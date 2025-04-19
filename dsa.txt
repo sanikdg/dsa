@@ -1,0 +1,566 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <iomanip>
+#include <vector>
+using namespace std;
+
+// User roles
+enum Role {
+    ADMIN,
+    PATIENT
+};
+
+// User struct
+struct User {
+    string username;
+    string password;
+    Role role;
+};
+
+// Vaccine struct for Linked List
+struct Vaccine {
+    int code;
+    string name;
+    int quantity;
+    int gapDays;
+    Vaccine* next;
+};
+
+// Appointment struct for tracking patient vaccinations
+struct Appointment {
+    string patientUsername; 
+    int vaccineCode;
+    string vaccineName;
+    string dose;      // "First" or "Second"
+    string hospital;
+    string location;
+    string date;      // Format: DD/MM/YYYY
+    bool completed;
+};
+
+// Global variables
+Vaccine* head = nullptr;
+vector<Appointment> appointments;
+vector<User> users;
+
+// Load users from file
+void loadUsers() {
+    ifstream file("users.txt");
+    string username, password, roleStr;
+    
+    while (file >> username >> password >> roleStr) {
+        Role role = (roleStr == "ADMIN") ? ADMIN : PATIENT;
+        users.push_back({username, password, role});
+    }
+    file.close();
+}
+
+// Save users to file
+void saveUsers() {
+    ofstream file("users.txt");
+    for (const User& user : users) {
+        file << user.username << " " << user.password << " " 
+             << (user.role == ADMIN ? "ADMIN" : "PATIENT") << endl;
+    }
+    file.close();
+}
+
+// Load appointments from file
+void loadAppointments() {
+    ifstream file("appointments.txt");
+    string patientUsername, vaccineName, dose, hospital, location, date, completedStr;
+    int vaccineCode;
+    
+    while (file >> patientUsername >> vaccineCode >> vaccineName >> dose >> 
+             hospital >> location >> date >> completedStr) {
+        bool completed = (completedStr == "1");
+        appointments.push_back({patientUsername, vaccineCode, vaccineName, dose, 
+                              hospital, location, date, completed});
+    }
+    file.close();
+}
+
+// Save appointments to file
+void saveAppointments() {
+    ofstream file("appointments.txt");
+    for (const Appointment& appt : appointments) {
+        file << appt.patientUsername << " " << appt.vaccineCode << " " 
+             << appt.vaccineName << " " << appt.dose << " " << appt.hospital << " " 
+             << appt.location << " " << appt.date << " " << (appt.completed ? "1" : "0") << endl;
+    }
+    file.close();
+}
+
+// =================== User Auth ===================
+pair<bool, Role> login(string uname, string pass) {
+    for (const User& user : users) {
+        if (user.username == uname && user.password == pass) {
+            return {true, user.role};
+        }
+    }
+    return {false, PATIENT}; // Default to patient if not found
+}
+
+void signUp(string uname, string pass, Role role) {
+    // Check if username already exists
+    for (const User& user : users) {
+        if (user.username == uname) {
+            cout << "❌ Username already exists. Please choose another.\n";
+            return;
+        }
+    }
+    
+    users.push_back({uname, pass, role});
+    saveUsers();
+    cout << "✅ User registered successfully!\n";
+}
+
+// =================== Vaccine Functions ===================
+void addVaccine(int code, string name, int quantity, int gap) {
+    // Check if vaccine code already exists
+    Vaccine* temp = head;
+    while (temp) {
+        if (temp->code == code) {
+            cout << "❌ Vaccine code already exists. Please use another code.\n";
+            return;
+        }
+        temp = temp->next;
+    }
+    
+    Vaccine* newVaccine = new Vaccine{code, name, quantity, gap, nullptr};
+    if (!head) head = newVaccine;
+    else {
+        temp = head;
+        while (temp->next) temp = temp->next;
+        temp->next = newVaccine;
+    }
+    cout << "✅ New Vaccine Added Successfully!\n";
+}
+
+void showVaccineList() {
+    Vaccine* temp = head;
+    if (!temp) {
+        cout << "No vaccines available.\n";
+        return;
+    }
+
+    cout << "\nTable of Available Vaccines\n";
+    cout << "====================================\n";
+    cout << left << setw(20) << "Vaccine name" << setw(15) << "Vaccine code"
+         << setw(20) << "Available quantity" << setw(15) << "Gap (days)" << endl;
+    cout << "------------------------------------\n";
+    while (temp) {
+        cout << setw(20) << temp->name << setw(15) << temp->code
+             << setw(20) << temp->quantity << setw(15) << temp->gapDays << endl;
+        temp = temp->next;
+    }
+    cout << "====================================\n";
+}
+
+Vaccine* searchVaccine(int code) {
+    Vaccine* temp = head;
+    while (temp) {
+        if (temp->code == code) return temp;
+        temp = temp->next;
+    }
+    return nullptr;
+}
+
+void updateQuantity(int code, int qty) {
+    Vaccine* v = searchVaccine(code);
+    if (v) {
+        v->quantity += qty;
+        cout << "✅ Quantity updated. New quantity: " << v->quantity << "\n";
+    } else {
+        cout << "❌ Vaccine not found.\n";
+    }
+}
+
+void deleteVaccine(int code) {
+    Vaccine *temp = head, *prev = nullptr;
+    while (temp) {
+        if (temp->code == code) {
+            if (prev) prev->next = temp->next;
+            else head = temp->next;
+            delete temp;
+            cout << "✅ Vaccine deleted.\n";
+            return;
+        }
+        prev = temp;
+        temp = temp->next;
+    }
+    cout << "❌ Vaccine not found.\n";
+}
+
+// =================== Patient Functions ===================
+void bookAppointment(string username) {
+    if (!head) {
+        cout << "No vaccines available for booking.\n";
+        return;
+    }
+    
+    showVaccineList();
+    
+    int vaccineCode, choice;
+    string hospital, location, date;
+    
+    cout << "\nEnter vaccine code to book: ";
+    cin >> vaccineCode;
+    
+    Vaccine* v = searchVaccine(vaccineCode);
+    if (!v) {
+        cout << "❌ Invalid vaccine code.\n";
+        return;
+    }
+    
+    if (v->quantity <= 0) {
+        cout << "❌ Sorry, this vaccine is out of stock.\n";
+        return;
+    }
+    
+    // Check if this would be first or second dose
+    string dose = "First";
+    for (const Appointment& appt : appointments) {
+        if (appt.patientUsername == username && appt.vaccineCode == vaccineCode && appt.dose == "First") {
+            dose = "Second";
+            break;
+        }
+    }
+    
+    cout << "Selected dose: " << dose << endl;
+    
+    cout << "Select hospital:\n";
+    cout << "1. RS Zahirah\n2. RS Medika\n3. RS Central\n";
+    cout << "Your choice: ";
+    cin >> choice;
+    
+    switch (choice) {
+        case 1: hospital = "RS Zahirah"; break;
+        case 2: hospital = "RS Medika"; break;
+        case 3: hospital = "RS Central"; break;
+        default: hospital = "RS Zahirah";
+    }
+    
+    cout << "Select location:\n";
+    cout << "1. Jakarta Selatan\n2. Cilandak\n3. Kebayoran Baru\n";
+    cout << "4. Lenteng Agung\n5. Srengseng Sawah\n6. Tanjung Barat\n";
+    cout << "Your choice: ";
+    cin >> choice;
+    
+    switch (choice) {
+        case 1: location = "Jakarta Selatan"; break;
+        case 2: location = "Cilandak"; break;
+        case 3: location = "Kebayoran Baru"; break;
+        case 4: location = "Lenteng Agung"; break;
+        case 5: location = "Srengseng Sawah"; break;
+        case 6: location = "Tanjung Barat"; break;
+        default: location = "Jakarta Selatan";
+    }
+    
+    cout << "Enter appointment date (DD/MM/YYYY): ";
+    cin.ignore();
+    getline(cin, date);
+    
+    // Add appointment
+    appointments.push_back({username, vaccineCode, v->name, dose, hospital, location, date, false});
+    
+    // Reduce vaccine stock
+    v->quantity--;
+    
+    // Save appointments
+    saveAppointments();
+    
+    cout << "✅ Appointment booked successfully!\n";
+}
+
+void viewAppointments(string username) {
+    bool found = false;
+    
+    cout << "\nYour Vaccination Appointments\n";
+    cout << "====================================\n";
+    cout << left << setw(20) << "Vaccine" << setw(10) << "Dose" 
+         << setw(15) << "Hospital" << setw(20) << "Location" 
+         << setw(15) << "Date" << setw(10) << "Status" << endl;
+    cout << "------------------------------------\n";
+    
+    for (const Appointment& appt : appointments) {
+        if (appt.patientUsername == username) {
+            found = true;
+            cout << setw(20) << appt.vaccineName << setw(10) << appt.dose 
+                 << setw(15) << appt.hospital << setw(20) << appt.location 
+                 << setw(15) << appt.date << setw(10) << (appt.completed ? "Done" : "Pending") << endl;
+        }
+    }
+    
+    if (!found) {
+        cout << "No appointments found.\n";
+    }
+    cout << "====================================\n";
+}
+
+void printVaccinationTicket(string username) {
+    cout << "\nEnter appointment date to print ticket (DD/MM/YYYY): ";
+    string date;
+    cin.ignore();
+    getline(cin, date);
+    
+    for (const Appointment& appt : appointments) {
+        if (appt.patientUsername == username && appt.date == date) {
+            cout << "\n===========================================\n";
+            cout << "         Your Vaccination Ticket           \n";
+            cout << "===========================================\n";
+            cout << "1. Name: " << username << endl;
+            cout << "2. Vaccine Type: " << appt.vaccineName << endl;
+            cout << "3. Dosage: " << appt.dose << endl;
+            cout << "4. Hospital: " << appt.hospital << endl;
+            cout << "5. Address: " << appt.location << endl;
+            cout << "===========================================\n";
+            cout << "Back to Main Menu (press any key)...\n";
+            cin.get();
+            return;
+        }
+    }
+    
+    cout << "❌ No appointment found for the given date.\n";
+}
+
+void viewPatientHistory(string adminUsername) {
+    cout << "Enter patient username to view history: ";
+    string username;
+    cin.ignore();
+    getline(cin, username);
+    
+    bool found = false;
+    for (const User& user : users) {
+        if (user.username == username && user.role == PATIENT) {
+            found = true;
+            break;
+        }
+    }
+    
+    if (!found) {
+        cout << "❌ Patient not found.\n";
+        return;
+    }
+    
+    viewAppointments(username);
+}
+
+void updateAppointmentStatus() {
+    cout << "Enter patient username: ";
+    string username;
+    cin.ignore();
+    getline(cin, username);
+    
+    viewAppointments(username);
+    
+    cout << "Enter appointment date to update (DD/MM/YYYY): ";
+    string date;
+    getline(cin, date);
+    
+    for (Appointment& appt : appointments) {
+        if (appt.patientUsername == username && appt.date == date) {
+            appt.completed = true;
+            saveAppointments();
+            cout << "✅ Appointment status updated to completed.\n";
+            return;
+        }
+    }
+    
+    cout << "❌ No appointment found for the given date.\n";
+}
+
+// =================== Admin Menu ===================
+void adminMenu(string username) {
+    int choice;
+    do {
+        cout << "\n====================================\n";
+        cout << "    Admin Dashboard - Welcome " << username << "\n";
+        cout << "====================================\n";
+        cout << "1. Add New Vaccine\n";
+        cout << "2. Update Vaccine Quantity\n";
+        cout << "3. Search Vaccine\n";
+        cout << "4. Show Vaccine List\n";
+        cout << "5. Delete Vaccine\n";
+        cout << "6. View Patient History\n";
+        cout << "7. Update Appointment Status\n";
+        cout << "8. Add New Admin\n";
+        cout << "9. Logout\n";
+        cout << "Enter your choice (1-9): ";
+        cin >> choice;
+
+        int code, qty, gap;
+        string name;
+
+        switch (choice) {
+            case 1:
+                cout << "Enter vaccine code: ";
+                cin >> code;
+                cout << "Enter name of the vaccine: ";
+                cin.ignore(); getline(cin, name);
+                cout << "Enter Initial Quantity: ";
+                cin >> qty;
+                cout << "Enter the Gap between 2 Doses (days): ";
+                cin >> gap;
+                addVaccine(code, name, qty, gap);
+                break;
+            case 2:
+                cout << "Enter vaccine code: ";
+                cin >> code;
+                cout << "Enter quantity to add: ";
+                cin >> qty;
+                updateQuantity(code, qty);
+                break;
+            case 3:
+                cout << "Enter vaccine code: ";
+                cin >> code;
+                {
+                    Vaccine* found = searchVaccine(code);
+                    if (found)
+                        cout << "✅ Found: " << found->name << ", Quantity: " << found->quantity
+                             << ", Gap: " << found->gapDays << " days\n";
+                    else
+                        cout << "❌ Vaccine not found.\n";
+                }
+                break;
+            case 4:
+                showVaccineList();
+                break;
+            case 5:
+                cout << "Enter vaccine code to delete: ";
+                cin >> code;
+                deleteVaccine(code);
+                break;
+            case 6:
+                viewPatientHistory(username);
+                break;
+            case 7:
+                updateAppointmentStatus();
+                break;
+            case 8:
+                {
+                    string newAdmin, pass;
+                    cout << "Enter new admin username: ";
+                    cin.ignore(); getline(cin, newAdmin);
+                    cout << "Enter password: ";
+                    getline(cin, pass);
+                    signUp(newAdmin, pass, ADMIN);
+                }
+                break;
+            case 9:
+                cout << "Logging out...\n";
+                break;
+            default:
+                cout << "Invalid option.\n";
+        }
+    } while (choice != 9);
+}
+
+// =================== Patient Menu ===================
+void patientMenu(string username) {
+    int choice;
+    do {
+        cout << "\n====================================\n";
+        cout << "    Patient Portal - Welcome " << username << "\n";
+        cout << "====================================\n";
+        cout << "1. View Available Vaccines\n";
+        cout << "2. Book Vaccination Appointment\n";
+        cout << "3. View My Appointments\n";
+        cout << "4. Print Vaccination Ticket\n";
+        cout << "5. Logout\n";
+        cout << "Enter your choice (1-5): ";
+        cin >> choice;
+
+        switch (choice) {
+            case 1:
+                showVaccineList();
+                break;
+            case 2:
+                bookAppointment(username);
+                break;
+            case 3:
+                viewAppointments(username);
+                break;
+            case 4:
+                printVaccinationTicket(username);
+                break;
+            case 5:
+                cout << "Logging out...\n";
+                break;
+            default:
+                cout << "Invalid option.\n";
+        }
+    } while (choice != 5);
+}
+
+// =================== Main Menu ===================
+int main() {
+    // Load data
+    loadUsers();
+    loadAppointments();
+    
+    // Add default admin if none exists
+    bool adminExists = false;
+    for (const User& user : users) {
+        if (user.role == ADMIN) {
+            adminExists = true;
+            break;
+        }
+    }
+    
+    if (!adminExists) {
+        users.push_back({"admin", "admin123", ADMIN});
+        saveUsers();
+        cout << "Default admin account created. Username: admin, Password: admin123\n";
+    }
+    
+    char option;
+    string uname, pass;
+
+    cout << "=============================================\n";
+    cout << "Welcome to the Vaccine Management System!\n";
+    cout << "=============================================\n";
+    cout << "Press S to sign up (Patient)\nPress L to log in\nChoice: ";
+    cin >> option;
+    cin.ignore();
+    
+    if (option == 'S' || option == 's') {
+        cout << "Please decide on a username and a password\n";
+        cout << "Username: ";
+        getline(cin, uname);
+        cout << "Password (do not use backspace): ";
+        getline(cin, pass);
+        signUp(uname, pass, PATIENT);
+        patientMenu(uname);
+    } else if (option == 'L' || option == 'l') {
+        cout << "Username: ";
+        getline(cin, uname);
+        cout << "Password (do not use backspace): ";
+        getline(cin, pass);
+        
+        auto [success, role] = login(uname, pass);
+        if (success) {
+            cout << "Access granted. Welcome, " << uname << "!\n";
+            if (role == ADMIN) {
+                adminMenu(uname);
+            } else {
+                patientMenu(uname);
+            }
+        } else {
+            cout << "Access denied. Incorrect credentials.\n";
+        }
+    } else {
+        cout << "Invalid option. Exiting.\n";
+    }
+
+    // Clean up linked list
+    Vaccine* current = head;
+    while (current) {
+        Vaccine* next = current->next;
+        delete current;
+        current = next;
+    }
+
+    return 0;
+}
